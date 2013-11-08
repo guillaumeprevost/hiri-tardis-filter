@@ -50,6 +50,7 @@ from struct import *
 import binascii
 import pdb
 import time
+import string
 from datetime import date
 
 logger = logging.getLogger(__name__)
@@ -149,103 +150,115 @@ class Flexstationfilter(object):
 
         with open(target, 'rb') as f:
 
-            # check the version number, abort if different from the expected one
+            # Checks the version number, abort if different from the expected one
             f.seek(3)
             pdaVersion = self.readStringUntilDelimiter(f)
-            if pdaVersion != "5.42.1.0":
+            if pdaVersion != "5.42.1.0" #and pdaVersion != "5.4.52.1.0":
+                print("Unsupported PDA file version. Metadata can't be extracted")
                 return {}
             metadata['softmax_version'] = pdaVersion
 
             f.seek(f.tell() + 1)
-            # Not in a try/except because if this fails to be read, there's no point continue the metadata extraction
             numberOfDatasets = self.readStringUntilDelimiter(f)
-            f.seek(2418) # skip until the end of header
+            numberOfDatasets = int(string.strip(string.split(numberOfDatasets, "=")[1], "\r "))
+            # Read until the end delimiter of the header
+            self.readStringUntilStringDelimiter(f, "\x48\x00\x00\x00\x48\x00\x00\x00")
 
-            # Experiment Name
-            try:
-                experimentName = self.readExperimentSection(f)
-                metadata['experiment_name'] = experimentName
-            except DatafileParameterSet.DoesNotExist:
-                logger.error('Failed to extract experiment name from PDA file.')
+            i = 0
+            while (i < numberOfDatasets):
+                self.readDataset(f, metadata)
+                i += 1
 
-            # Templates Groups and Samples
-            try:
-                tmplGroupTitle, tmplSampleTitle = self.readTmplGroupAndSample(f)
-                while tmplGroupTitle and tmplSampleTitle:
-                    tmplGroupTitle, tmplSampleTitle = self.readTmplGroupAndSample(f)
-            except DatafileParameterSet.DoesNotExist:
-                logger.error('Failed to extract Templates from PDA file.')
-
-            # Number of Wells
-            try:
-                numberOfWells = self.readWells(f)
-                metadata['number_of_wells_or_cuvette'] = numberOfWells
-            except DatafileParameterSet.DoesNotExist:
-                logger.error('Failed to extract number of wells or cuvettes from PDA file.')
+        return metadata
 
 
-            # Analysis Notes
-            try:
-                analysisName, analysisContent = self.readAnalysisSection(f)
+    def readDataset(self, f, metadata):
+        # Experiment Name
+        try:
+            experimentName = self.readExperimentSection(f)
+            metadata['experiment_name'] = experimentName
+        except NameError:
+            logger.error('Failed to extract experiment name from PDA file.')
+
+        # Templates Groups and Samples
+        try:
+            tmplTitle = self.readTmplGroupOrSample(f)
+            while tmplTitle != None:
+                tmplTitle = self.readTmplGroupOrSample(f)
+        except NameError:
+            logger.error('Failed to extract Templates from PDA file.')
+
+        # Number of Wells
+        try:
+            numberOfWells = self.readWells(f)
+            metadata['number_of_wells_or_cuvette'] = numberOfWells
+        except NameError:
+            logger.error('Failed to extract number of wells or cuvettes from PDA file.')
+
+        # Analysis Notes
+        try:
+            analysisName, analysisContent = self.readAnalysisSection(f)
+            if analysisContent:
                 metadata['analysis_notes'] = str.format("{0}: {1}", analysisName, analysisContent)
-            except DatafileParameterSet.DoesNotExist:
-                logger.error('Failed to extract analysis notes from PDA file.')
+        except NameError:
+            logger.error('Failed to extract analysis notes from PDA file.')
 
-            # Plate Section
-            try:
-                plateName = self.readPlateSection(f)
-            except DatafileParameterSet.DoesNotExist:
-                logger.error('Failed to read plate section from PDA file.')
+        # Plate Section
+        try:
+            plateName = self.readPlateSection(f)
+        except NameError:
+            logger.error('Failed to read plate section from PDA file.')
 
-            # Plate Data
-            try:
-                firstReadColumn, numberOfColumns, readNumber, emValues, readDuration, \
-                readInterval, exValues, trans1, trans2 = self.readPlateData(f)
+        # Plate Data
+        try:
+            firstReadColumn, numberOfColumns, readNumber, emValues, readDuration, \
+            readInterval, exValues, trans1, trans2 = self.readPlateData(f)
+            if numberOfColumns > 1:
                 metadata['strips'] = str.format("{0}-{1}", firstReadColumn, firstReadColumn + numberOfColumns - 1)
-                metadata['kinetic_points'] = readNumber
-                metadata['kinetic_flex_read_time'] = readDuration
-                metadata['kinetic_flex_interval'] = readInterval
-                # TODO: alternate these in function of the read type
-                #metadata['well_scan_read_pattern'] = ''
-                #metadata['well_scan_density'] = ''
-                metadata['read_wavelength'] = emValues
-                metadata['excitation_wavelengths'] = exValues
-                metadata['trans1'] = trans1
-                metadata['trans2'] = trans2
-            except DatafileParameterSet.DoesNotExist:
-                logger.error('Failed to extract plate data from PDA file.')
+            else:
+                metadata['strips'] = str.format("{0}", firstReadColumn)
+            metadata['kinetic_points'] = readNumber
+            metadata['kinetic_flex_read_time'] = readDuration
+            metadata['kinetic_flex_interval'] = readInterval
+            # TODO: alternate these in function of the read type
+            #metadata['well_scan_read_pattern'] = ''
+            #metadata['well_scan_density'] = ''
+            metadata['read_wavelength'] = emValues
+            metadata['excitation_wavelengths'] = exValues
+            metadata['trans1'] = trans1
+            metadata['trans2'] = trans2
+        except NameError:
+            logger.error('Failed to extract plate data from PDA file.')
+
+        # Plate Section
+        try:
+            self.readPlateDescriptor(f)
+        except NameError:
+            logger.error('Failed to read plate descriptor from PDA file.')
+
+        # Flex Sites (Actual Data)
+        try:
+            self.readFlexSites(f, numberOfColumns)
+        except NameError:
+            logger.error('Failed to read flex sites from PDA file.')
+
+        # Plate Body
+        try:
+            wavelength, wavelengthCombination, formula, unknown, instrumentInfos = self.readCalcPlateBody(f)
+            metadata['wavelength_combination'] = wavelengthCombination
+            metadata['instrument_info'] = instrumentInfos
+        except NameError:
+            logger.error('Failed to read flex sites from PDA file.')
 
 
-            # Plate Section
-            try:
-                self.readPlateDescriptor(f)
-            except DatafileParameterSet.DoesNotExist:
-                logger.error('Failed to read plate descriptor from PDA file.')
-
-            # Flex Sites (Actual Data)
-            try:
-                self.readFlexSites(f, numberOfColumns)
-            except DatafileParameterSet.DoesNotExist:
-                logger.error('Failed to read flex sites from PDA file.')
-
-
-            # Plate Body
-            try:
-                wavelength, wavelengthCombination, formula, unknown, instrumentInfos = self.readCalcPlateBody(f)
-                metadata['wavelength_combination'] = wavelengthCombination
-                metadata['instrument_info'] = instrumentInfos
-            except DatafileParameterSet.DoesNotExist:
-                logger.error('Failed to read flex sites from PDA file.')
-
-
-            # TODO: find and extract these metadata
-            #metadata['plate_read_time'] = date.today()
-                # Section Kind ?  either Plate or Cuvette.
-            #metadata['read_type'] = 'Endpoint, Kinetic, Spectrum, Well Scan, or Flex'
-            #metadata['data_mode'] = 'For absorbance plates: Absorbance or % Transmittance. For others: Fluorescence, Luminescence, or Time Resolved Fluorescence.'
-            #metadata['data_type'] = 'Raw or Reduced'
-            #metadata['read_per_well'] = 6
-            #metadata['pmt_settings'] = 'Automatic, High, Medium, or Low'
+        # TODO: find and extract these metadata
+        #metadata['plate_read_time'] = date.today()
+            # Section Kind ?  either Plate or Cuvette.
+        #metadata['read_type'] = 'Endpoint, Kinetic, Spectrum, Well Scan, or Flex'
+        #metadata['data_mode'] = 'For absorbance plates: Absorbance or % Transmittance. For others: Fluorescence, Luminescence, or Time Resolved Fluorescence.'
+        #metadata['data_type'] = 'Raw or Reduced'
+        #metadata['read_per_well'] = 6
+        #metadata['pmt_settings'] = 'Automatic, High, Medium, or Low'
 
         return metadata
 
@@ -262,23 +275,32 @@ class Flexstationfilter(object):
         #structure = binascii.hexlify(f.read(1))
         #experimentName, serialnum, school, gradelevel = unpack('<10sHHb', record)
 
-        return (experimentName, f)
+        return (experimentName)
 
-    def readTmplGroupAndSample(self, f):
+    # read either a template group or a template sample structure
+
+    def readTmplGroupOrSample(self, f):
         fileIndexSave = f.tell()
 
+        # try to read a template group
+        f.seek(fileIndexSave)
         f.seek(f.tell() + 4) # skip a 4-bytes number
         tmplGroupTitle = self.readTmplGroup(f)
-        tmplSampleTitle = self.readTmplSample(f)
-
-        if tmplGroupTitle == None or tmplSampleTitle == None:
+        if tmplGroupTitle != None: # if the template was a group
+            return (tmplGroupTitle)
+        else:
+            # try to read a template sample
             f.seek(fileIndexSave)
-            return None, None
+            f.seek(f.tell() + 4) # skip a 4-bytes number
+            tmplSampleTitle = self.readTmplSample(f)
+            if tmplSampleTitle != None:
+                return (tmplSampleTitle)
 
-        return tmplGroupTitle, tmplSampleTitle
+        f.seek(fileIndexSave)
+        return (None)
 
     # reads a 'TmplGroup' structure
-    # returns the template group title, and the file after reading
+    # returns the template group title
     def readTmplGroup(self, f):
         structureName = self.readStructureName(f)
         if structureName != "CSTmplGroup":
@@ -286,14 +308,17 @@ class Flexstationfilter(object):
 
         tmplGroupTitle = self.readStringUntilDelimiter(f)
 
-        f.seek(f.tell() + 35)
+        f.seek(f.tell() + 8)
+        descriptorUnit = self.readStringUntilDelimiter(f)
+        f.seek(f.tell() + 4)
+        descriptorTitle = self.readStringUntilDelimiter(f)
+        f.seek(f.tell() + 21)
 
         return (tmplGroupTitle)
 
     # reads a 'TmplSample' structure
-    # returns the template sample title, and the file after reading
+    # returns the template sample title
     def readTmplSample(self, f):
-        f.seek(f.tell() + 4)
         structureName = self.readStructureName(f)
         if structureName != "CSTmplSample":
             return
@@ -315,6 +340,8 @@ class Flexstationfilter(object):
 
         return numberOfWells
 
+    # reads a 'Well' structure
+    # returns the well name, and its row, column and plate numbers
     def readWell(self, f):
         structureName = self.readStructureName(f)
         if structureName != "CSWell":
@@ -332,7 +359,7 @@ class Flexstationfilter(object):
         return (wellName, rowNumber, columnNumber, plateNumber)
 
     # reads an 'AnalysisSection' structure
-    # returns the analysis section name, its content, and the file after reading
+    # returns the analysis section name and its content
     def readAnalysisSection(self, f):
         f.seek(f.tell() + 4)
 
@@ -349,6 +376,8 @@ class Flexstationfilter(object):
         f.seek(f.tell() + 58)
         return (analysisName, analysisContent)
 
+    # reads a 'PlateSection' structure
+    # returns the plate name
     def readPlateSection(self, f):
         structureName = self.readStructureName(f)
         if structureName != "CSPlateSection":
@@ -359,6 +388,9 @@ class Flexstationfilter(object):
 
         return (plateName)
 
+    #reads a 'PlateData' structure
+    # returns the first column read, the number of columns read, the number of reads, the read wavelengths, the read
+    # duration, the read interval, the excitation wavelengths, and the trans1 and trans2 values
     def readPlateData(self, f):
         structureName = self.readStructureName(f)
         if structureName != "CSPlateData":
@@ -429,6 +461,8 @@ class Flexstationfilter(object):
 
         return (firstReadColumn, numberOfColumns, readNumber, emValues, readDuration, readInterval, exValues, trans1, trans2)
 
+    # reads a 'PlateDescriptor' structure
+    # returns the number of plates
     def readPlateDescriptor(self, f):
         structureName = self.readStructureName(f)
         if structureName != "CSPlateDescriptor":
@@ -449,13 +483,18 @@ class Flexstationfilter(object):
 
         return (numberOfPlates)
 
+    # reads the Flex Sites list.
+    # Parameter numberOfColumn: the length of the list depends on the number of columns read
     def readFlexSites(self, f, numberOfColumns):
         i = 0;
         while i < (numberOfColumns * 8):
             self.readFlexSite(f)
             i += 1
         f.seek(f.tell() + 1)
+        return (None)
 
+    # reads a 'FlexSite' structure
+    # returns the id of the Flex site
     def readFlexSite(self, f):
         structureName = self.readStructureName(f)
         if structureName != "CSFlexSite":
@@ -480,6 +519,8 @@ class Flexstationfilter(object):
 
         return (id)
 
+    # reads a CalcPlateBody' structure
+    # returns the wavelength, the formula for combining wavelength and the information about the plate reader instrument
     def readCalcPlateBody(self, f):
         structureName = self.readStructureName(f)
         if structureName != "CSCalcPlateBody":
@@ -498,18 +539,17 @@ class Flexstationfilter(object):
 
         return (wavelength, wavelengthCombination, formula, unknown, instrumentInfos)
 
+    # reads a 'MorphPlateTable' structure
     def readMorphPlateTable(self, f):
         structureName = self.readStructureName(f)
         if structureName != "CSMorphPlateTable":
             return
-
         f.seek(f.tell() + 77)
-
         return (None)
 
     # reads a string from binary until a delimiter is reached (default '\x00')
-    # returns: the string and the file after reading
-    def readStringUntilDelimiter(self, f, delimiter = "\x00"):
+    # returns: the string
+    def readStringUntilDelimiter(self, f, delimiter="\x00"):
         result = ''
         data = f.read(1)
         while data != delimiter:
@@ -517,8 +557,21 @@ class Flexstationfilter(object):
             data = f.read(1)
         return (result)
 
+    # reads a string from binary until a string delimiter is reached (default '\x00')
+    # returns: the string
+    def readStringUntilStringDelimiter(self, f, delimiter="\x00"):
+        result = ''
+        data = f.read(1)
+        while data:
+            result += str(unpack("c", data)[0])
+            if result.endswith(delimiter):
+                return (result.replace(delimiter, ""))
+            data = f.read(1)
+
+        return (None) # reached the end of the file without finding the delimiter
+
     # reads a structure in the PDA format
-    # returns: the structure name and the file after reading
+    # returns: the structure name
     def readStructureName(self, f):
         return (self.readStringWithLengthPrefix(f, 1))
 
