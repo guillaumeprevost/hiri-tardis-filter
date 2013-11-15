@@ -56,7 +56,7 @@ from datetime import date
 logger = logging.getLogger(__name__)
 
 
-class Flexstationfilter(object):
+class FlexstationFilter(object):
 
     NUMBER_OF_ROWS = 8
     HEADER_END_DELIMITER = "\x48\x00\x00\x00\x48\x00\x00\x00"
@@ -83,8 +83,7 @@ class Flexstationfilter(object):
             {'name': 'read_type', 'full_name': 'Read Type', 'data_type': ParameterName.STRING}, # Endpoint, Kinetic, Spectrum, Well Scan, or Flex
             {'name': 'data_mode', 'full_name': 'Data Mode', 'data_type': ParameterName.STRING}, # For absorbance plates: Absorbance or % Transmittance. For others: Fluorescence, Luminescence, or Time Resolved Fluorescence.
             {'name': 'data_type', 'full_name': 'Data Type', 'data_type': ParameterName.STRING}, # Raw or Reduced.
-            {'name': 'trans1', 'full_name': 'Trans 2', 'data_type': ParameterName.STRING}, # example: (H=80u,R=4, V=20u@15)
-            {'name': 'trans2', 'full_name': 'Trans 1', 'data_type': ParameterName.STRING}, # example (H=100u,R=4, V=20u@115)
+            {'name': 'trans', 'full_name': 'Trans', 'data_type': ParameterName.STRING}, # example: (H=80u,R=4, V=20u@15)
             {'name': 'kinetic_points', 'full_name': 'Kinetic Points', 'data_type': ParameterName.NUMERIC}, # Reduced plates and Endpoint plates = 1 Kinetic / Spectrum plates: number of reads
             {'name': 'kinetic_flex_read_time', 'full_name': 'Kinetic/Flex Time', 'data_type': ParameterName.NUMERIC}, # Kinetic/Flex read time in seconds.
             {'name': 'kinetic_flex_interval', 'full_name': 'Kinetic/Flex Interval', 'data_type': ParameterName.NUMERIC}, # Kinetic or Flex read interval in seconds
@@ -99,7 +98,6 @@ class Flexstationfilter(object):
             {'name': 'excitation_wavelengths', 'full_name': 'Excitation Wavelengths', 'data_type': ParameterName.STRING}, # Excitation wavelengths, separated by spaces; For Luminescence or sweeps, this is a blank field (the emSweep excitation wavelength is in field 16).
             {'name': 'read_per_well', 'full_name': 'Read Per Well', 'data_type': ParameterName.NUMERIC}, # Number of times a well is read for a single reading.
             {'name': 'pmt_settings', 'full_name': 'PMT Settings', 'data_type': ParameterName.STRING}, # Automatic, High, Medium, or Low
-            {'name': 'pmt_settings', 'full_name': 'PMT Settings', 'data_type': ParameterName.STRING}, # Reduction Formula to combine wavelengths
             #{'name': 'start_integration_settings', 'full_name': 'Start Integration Time'}, # Time to start integration for Time Resolved Fluorescence; otherwise, blank field.
             #{'name': 'end_integration_time', 'full_name': 'End Integration Time'}, # Time to end integration for Time Resolved Fluorescence; otherwise, blank field.
         )
@@ -118,13 +116,12 @@ class Flexstationfilter(object):
             instance = kwargs.get('instance') # get the file in the database
             filepath = instance.get_absolute_filepath()  # get the real location of the file
             mimetype = instance.get_mimetype() # get the file type
-
-            # TODO: also check using magic number if there is one for PDA files
-            if mimetype != 'application/octet-stream' and filepath.endswith((".pda", ".PDA")): # exit if we're not looking at a PDA file
-                return None
-
             logger.info(filepath)
             logger.info(mimetype)
+
+            # exit if we're not looking at a PDA file
+            if mimetype != 'application/octet-stream' and filepath.endswith((".pda", ".PDA")):
+                return None
 
             # get or create the schema to hold these parameters
             schema = self.getSchema()
@@ -136,10 +133,10 @@ class Flexstationfilter(object):
             metadata = self.extractMetadata(filepath)
 
             self.saveFlexstationMetadata(instance, schema, metadata) # save this metadata to a file
+
         except Exception as e:
             # if anything goes wrong, log it in tardis.log and exit
             print(e)
-            pdb.set_trace()
             logger.info(e)
             return None
 
@@ -289,11 +286,13 @@ class Flexstationfilter(object):
         numberOfColumns = 0
         try:
             fileIndexSave = f.tell()
-            firstReadColumn, numberOfColumns, readNumber, emValues, readDuration, readInterval, exValues, trans1, trans2 = self.readPlateData(f)
+            firstReadColumn, numberOfColumns, readNumber, wavelengthsNumber, emValues, readDuration, readInterval, exValues, trans = self.readPlateData(f)
             if numberOfColumns > 1:
                 metadata['strips'] = str.format("{0}-{1}", firstReadColumn, firstReadColumn + numberOfColumns - 1)
             else:
                 metadata['strips'] = str.format("{0}", firstReadColumn)
+            if (wavelengthsNumber):
+                metadata['number_of_wavelengths'] = wavelengthsNumber
             if (readNumber):
                 metadata['kinetic_points'] = readNumber
             if (readDuration):
@@ -307,10 +306,8 @@ class Flexstationfilter(object):
                 metadata['read_wavelength'] = emValues
             if (exValues):
                 metadata['excitation_wavelengths'] = exValues
-            if (trans1):
-                metadata['trans1'] = trans1
-            if (trans2):
-                metadata['trans2'] = trans2
+            if (trans):
+                metadata['trans'] = trans
         except:
             f.seek(fileIndexSave)
             print('Failed to extract plate data from PDA file.')
@@ -382,31 +379,8 @@ class Flexstationfilter(object):
 
         return (experimentName)
 
-    def readTmplGroupOrSample(self, f):
-        """Read either a template group or a template sample structure
-        :param f: the opened PDA file to read
-        :type f: file
-        :returns tmplSampleTitle: (or tmplGroupTitle) the name of the template group or template sample. None if no template group or sample could be read.
-        :type tmplSampleTitle: str
-        """
-        fileIndexSave = f.tell()
+    #def readTmplGroupOrSampleOrAnalysis(self, f, metadata):
 
-        # try to read a template group
-        f.seek(fileIndexSave)
-        f.seek(f.tell() + 4) # skip a 4-bytes number
-        tmplGroupTitle = self.readTmplGroup(f)
-        if tmplGroupTitle != None: # if the template was a group
-            return (tmplGroupTitle)
-        else:
-            # try to read a template sample
-            f.seek(fileIndexSave)
-            f.seek(f.tell() + 4) # skip a 4-bytes number
-            tmplSampleTitle = self.readTmplSample(f)
-            if tmplSampleTitle != None:
-                return (tmplSampleTitle)
-
-        f.seek(fileIndexSave)
-        return (None)
 
     def readTmplGroup(self, f):
         """Reads a 'TmplGroup' structure
@@ -445,6 +419,35 @@ class Flexstationfilter(object):
         f.seek(f.tell() + 24)
 
         return (tmplSampleTitle)
+
+    def readAnalysisSection(self, f):
+        """Reads a 'AnalysisSection' structure
+        :param f: the opened PDA file to read
+        :type f: file
+        :returns analysisName: the name of the analysis section
+        :type analysisName: str
+        :returns analysisContent: the content of the analysis section
+        :type analysisContent: str
+        """
+        structureName = self.readStructureName(f)
+        if structureName != "CSAnalysisSection":
+            return (None, None)
+
+        analysisName = self.readStringUntilDelimiter(f)
+
+        f.seek(f.tell() + 28) # skip 28 bytes
+
+        analysisContent = self.readStringWithLengthPrefix(f, 4)
+
+        #f.seek(f.tell() + 58)
+        delimiter = ""
+        i = 0
+        while (i < 32):
+            delimiter = delimiter + "\xFF"
+            i += 1
+        self.readStringUntilStringDelimiter(f, delimiter)
+
+        return (analysisName, analysisContent)
 
     def readWells(self, f):
         """Reads several 'Well' structures, based on the number of wells
@@ -493,35 +496,6 @@ class Flexstationfilter(object):
         f.seek(f.tell() + 4) # skip 4
 
         return (wellName, rowNumber, columnNumber, plateNumber)
-
-    def readAnalysisSection(self, f):
-        """Reads a 'AnalysisSection' structure
-        :param f: the opened PDA file to read
-        :type f: file
-        :returns analysisName: the name of the analysis section
-        :type analysisName: str
-        :returns analysisContent: the content of the analysis section
-        :type analysisContent: str
-        """
-        structureName = self.readStructureName(f)
-        if structureName != "CSAnalysisSection":
-            return (None, None)
-
-        analysisName = self.readStringUntilDelimiter(f)
-
-        f.seek(f.tell() + 28) # skip 28 bytes
-
-        analysisContent = self.readStringWithLengthPrefix(f, 4)
-
-        #f.seek(f.tell() + 58)
-        delimiter = ""
-        i = 0
-        while (i < 32):
-            delimiter  = delimiter + "\xFF"
-            i += 1
-        self.readStringUntilStringDelimiter(f, delimiter)
-
-        return (analysisName, analysisContent)
 
     def readPlateSection(self, f):
         """Reads a 'PlateSection' structure
@@ -579,13 +553,17 @@ class Flexstationfilter(object):
         wavelengthsNumberHex = binascii.hexlify(f.read(4))
         wavelengthsNumber = int(wavelengthsNumberHex, 16)
 
-        emWaveValue1Hex = binascii.hexlify(f.read(4))
-        emWaveValue1 = int(emWaveValue1Hex, 16)
-        f.seek(f.tell() + 1)
-        emWaveValue2Hex = binascii.hexlify(f.read(4))
-        emWaveValue2 = int(emWaveValue2Hex, 16)
-        f.seek(f.tell() + 1)
-        emValues = str.format("{0} {1}", emWaveValue1, emWaveValue2)
+        i = 0
+        emValues = None
+        while (i < wavelengthsNumber):
+            emWaveValueHex = binascii.hexlify(f.read(4))
+            emWaveValue = int(emWaveValueHex, 16)
+            f.seek(f.tell() + 1)
+            if (emValues != None):
+                emValues = str.format("{0} {1}", emValues, emWaveValue)
+            else:
+                emValues = str.format("{0}", emWaveValue)
+            i += 1
 
         f.seek(f.tell() + 4)
 
@@ -597,39 +575,42 @@ class Flexstationfilter(object):
 
         f.seek(f.tell() + 170)
 
-        exWaveValue1Hex = binascii.hexlify(f.read(4))
-        exWaveValue1 = int(exWaveValue1Hex, 16)
-        f.seek(f.tell() + 4)
-        exWaveValue2Hex = binascii.hexlify(f.read(4))
-        exWaveValue2 = int(exWaveValue2Hex, 16)
-        exValues = str.format("{0} {1}", exWaveValue1, exWaveValue2)
+        i = 0
+        exValues = None
+        while (i < wavelengthsNumber):
+            exWaveValueHex = binascii.hexlify(f.read(4))
+            exWaveValue = int(exWaveValueHex, 16)
+            f.seek(f.tell() + 4)
+            if (exValues != None):
+                exValues = str.format("{0} {1}", exValues, exWaveValue)
+            else:
+                exValues = str.format("{0}", exWaveValue)
+            i += 1
 
-        f.seek(f.tell() + 663)
+        f.seek(f.tell() + 659)
 
-        trans1RHex = binascii.hexlify(f.read(4))
-        trans1R = int(trans1RHex, 16)
-        trans1AtHex = binascii.hexlify(f.read(4))
-        trans1At = int(trans1AtHex, 16)
-        trans1VHex = binascii.hexlify(f.read(8))
-        trans1V = unpack('!d', trans1VHex.decode('hex'))[0]
-        trans1HHex = binascii.hexlify(f.read(4))
-        trans1H = int(trans1HHex, 16)
-        trans1 = str.format("H={0}\xb5, R={1}, V={2}\xb5, \x40{3}", trans1H, trans1R, trans1V, trans1At)
-        f.seek(f.tell() + 16)
+        i = 0
+        trans = None
+        while (i < wavelengthsNumber):
+            transRHex = binascii.hexlify(f.read(4))
+            transR = int(transRHex, 16)
+            transAtHex = binascii.hexlify(f.read(4))
+            transAt = int(transAtHex, 16)
+            transVHex = binascii.hexlify(f.read(8))
+            transV = unpack('!d', transVHex.decode('hex'))[0]
+            transHHex = binascii.hexlify(f.read(4))
+            transH = int(transHHex, 16)
+            f.seek(f.tell() + 16)
+            formattedTrans = str.format("Trans{0}: H={1}\xb5, R={2}, V={3}\xb5, \x40{4}", (i + 1), transH, transR, transV, transAt)
+            if (trans != None):
+                trans = str.format("{0}. {1}", trans, formattedTrans)
+            else:
+                trans = str.format("{0}", formattedTrans)
+            i += 1
 
-        trans2RHex = binascii.hexlify(f.read(4))
-        trans2R = int(trans2RHex, 16)
-        trans2AtHex = binascii.hexlify(f.read(4))
-        trans2At = int(trans2AtHex, 16)
-        trans2VHex = binascii.hexlify(f.read(8))
-        trans2V = unpack('!d', trans2VHex.decode('hex'))[0]
-        trans2HHex = binascii.hexlify(f.read(4))
-        trans2H = int(trans2HHex, 16)
-        trans2 = str.format("H={0}\xb5, R={1}, V={2}\xb5, \x40{3}", trans2H, trans2R, trans2V, trans2At)
+        f.seek(f.tell() + 75)
 
-        f.seek(f.tell() + 91)
-
-        return (firstReadColumn, numberOfColumns, readNumber, emValues, readDuration, readInterval, exValues, trans1, trans2)
+        return (firstReadColumn, numberOfColumns, readNumber, wavelengthsNumber, emValues, readDuration, readInterval, exValues, trans)
 
     def readPlateDescriptor(self, f):
         """Reads a 'PlateDescriptor' structure
@@ -859,12 +840,10 @@ class Flexstationfilter(object):
 
         return ps
 
-    # get a list of parameters for this schema (don't have to understand this)
     def getParameters(self, schema, metadata):
-        """Return a list of the paramaters that will be saved.
+        """ Get a list of parameters for this schema
+            Return a list of the parameters that will be saved.
         """
-        logger.info('test1')
-
         param_objects = ParameterName.objects.filter(schema=schema)
         parameters = []
         for p in metadata:
@@ -934,7 +913,7 @@ def make_filter(name='', schema=''):
         raise ValueError("FlexstationFilter requires a name to be specified")
     if not schema:
         raise ValueError("FlexstationFilter requires a schema to be specified")
-    return Flexstationfilter(name, schema)
+    return FlexstationFilter(name, schema)
 
 
-make_filter.__doc__ = Flexstationfilter.__doc__
+make_filter.__doc__ = FlexstationFilter.__doc__
