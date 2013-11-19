@@ -144,7 +144,7 @@ class FlexstationFilter(object):
         """Extracts the metadata from a PDA file (binary produced by SoftMax Pro)
         :param target: the path of the PDA file to extract metadata from
         :type target: str
-        :returns metadata: the dictionnary of the extracted metadata
+        :returns metadata: the dictionary of the extracted metadata
         :type metadata: dict
         """
         metadata = {}
@@ -180,9 +180,9 @@ class FlexstationFilter(object):
         """Extracts the metadata from a PDA file (binary produced by SoftMax Pro)
         :param f: the opened PDA file to read
         :type f: file
-        :param metadata: the dictionnary to add metadata into
+        :param metadata: the dictionary to add metadata into
         :type metadata: dict
-        :returns metadata: the dictionnary of the extracted metadata
+        :returns metadata: the dictionary of the extracted metadata
         :type metadataa: dict
         """
 
@@ -379,9 +379,6 @@ class FlexstationFilter(object):
 
         return (experimentName)
 
-    #def readTmplGroupOrSampleOrAnalysis(self, f, metadata):
-
-
     def readTmplGroup(self, f):
         """Reads a 'TmplGroup' structure
         :param f: the opened PDA file to read
@@ -523,18 +520,18 @@ class FlexstationFilter(object):
         :type numberOfColumns: int
         :returns readNumber: the number of reads
         :type readNumber: int
+        :returns wavelengthsNumber: the number of wavelengths
+        :type wavelengthsNumber: int
         :returns emValues: the values of the different wavelengths, separated by spaces
         :type emValues: str
         :returns readDuration: the duration of the read
         :type readDuration: int
-        :returns readInterval: the interval between ech read
+        :returns readInterval: the interval between each read
         :type readInterval: int
         :returns exValues: the values of the excitation wavelengths, separated by spaces
         :type exValues: str
-        :returns trans1: the values of trans1, formatted as 'H={0}µ, R={1}, V={2}µ, @{3}'
-        :type trans1: str
-        :returns trans2: the values of trans2, formatted as 'H={0}µ, R={1}, V={2}µ, @{3}'
-        :type trans2: str
+        :returns trans: the values of trans, formatted as 'H={0}µ, R={1}, V={2}µ, @{3}'
+        :type trans: str
         """
         structureName = self.readStructureName(f)
         if structureName != "CSPlateData":
@@ -642,7 +639,7 @@ class FlexstationFilter(object):
         """Reads several 'FlexSite' structures, based on the number of rows and columns
         :param f: the opened PDA file to read
         :type f: file
-        :param numberOfColumns: the number of columns read.
+        :param numberOfColumns: the number of columns read
         :type numberOfColumns: int
         """
         i = 0;
@@ -731,11 +728,11 @@ class FlexstationFilter(object):
 
     def readStringUntilDelimiter(self, f, delimiter="\x00"):
         """Reads a string from binary until a single-character delimiter is reached
-        :param f: the opened hexadecimal file to read
+        :param f: the opened PDA file to read
         :type f: file
         :param delimiter: the delimiter which stops the reading if encountered (default '\x00')
         :type delimiter: str
-        :returns result: the string that was read, without the end delimiter. None if the delimiter was never found.
+        :returns result: the string that was read, without the end delimiter. None if the delimiter was never found
         :type result: str
         """
         result = ''
@@ -746,8 +743,8 @@ class FlexstationFilter(object):
         return (result)
 
     def readStringUntilStringDelimiter(self, f, delimiter="\x00"):
-        """Reads a string from binary until a string delimiter is reached.
-        :param f: the opened hexadecimal file to read
+        """Reads a string from binary until a string delimiter is reached (accepts a multiple-characters delimiter)
+        :param f: the opened PDA file to read
         :type f: file
         :param delimiter: the delimiter which stops the reading if encountered (default "\x00")
         :type delimiter: str
@@ -766,7 +763,7 @@ class FlexstationFilter(object):
 
     def readStructureName(self, f):
         """Reads a structure name in the PDA format
-        :param f: the opened hexadecimal file to read
+        :param f: the opened PDA file to read
         :type f: file
         :returns structureName: the name of the structure
         :type structureName:
@@ -776,7 +773,7 @@ class FlexstationFilter(object):
 
     def readStringWithLengthPrefix(self, f, numberOfByteForPrefix):
         """Reads a string prefixed by its length as a n-byte number
-        :param f: the opened hexadecimal file to read
+        :param f: the opened PDA file to read
         :type f: file
         :param numberOfByteForPrefix: the number of bytes on which the prefix is encoded
         :type numberOfByteForPrefix: int
@@ -794,7 +791,7 @@ class FlexstationFilter(object):
         return (stringContent)
 
     def skipIfNumber(self, f, numbers):
-        """Reads a string prefixed by its length as a n-byte number
+        """Skips a number
         :param f: the opened hexadecimal file to read
         :type f: file
         :param numbers: a dictionnary of the numbers that should be skipped
@@ -807,9 +804,8 @@ class FlexstationFilter(object):
         if (number not in numbers):
             f.seek(fileIndexSave)
 
-    # save or overwrite the datafile's metadata from the database
     def saveFlexstationMetadata(self, instance, schema, metadata):
-        """Save all the metadata to a Dataset_Files parameter set.
+        """Saves or overwrites the datafile's metadata to a Dataset_Files parameter set in the database.
         """
         logger.info('Saving Metadata')
 
@@ -841,8 +837,13 @@ class FlexstationFilter(object):
         return ps
 
     def getParameters(self, schema, metadata):
-        """ Get a list of parameters for this schema
-            Return a list of the parameters that will be saved.
+        """Get a list of parameters for this schema
+        :param schema: the schema under which the meta-data will be saved
+        :type schema: Schema
+        :param numbers: the dictionary of meta-data to be saved
+        :type numbers: dict
+        :returns parameters: a list of the parameters that will be saved.
+        :type parameters: dict
         """
         param_objects = ParameterName.objects.filter(schema=schema)
         parameters = []
@@ -880,7 +881,7 @@ class FlexstationFilter(object):
         return parameters
 
     def getSchema(self):
-        """Return the schema object that the paramaterset will use.
+        """Returns the schema object that the parameter set will use.
         """
         try:
             return Schema.objects.get(namespace__exact=self.schema)
@@ -889,9 +890,9 @@ class FlexstationFilter(object):
             schema.save()
             return schema
 
-    # takes a list of paramnames (defined in the __init__ method) to get or create new
     def getOrCreateParameterNames(self, schema, paramnames):
-
+        """ Takes a list of paramnames (defined in the __init__ method) to get or create new parameter names objects
+        """
         pn_objects = []
         for paramname in paramnames:
             param_objects = ParameterName.objects.filter(schema=schema, name=paramname['name'])
@@ -909,6 +910,11 @@ class FlexstationFilter(object):
 
 
 def make_filter(name='', schema=''):
+    ''' Instantiate and return the FlexstationFilter class
+    :param name: the name of the filter
+    :param schema: the short name of the schema to use for this filter
+    :return: a new instance of the FlexstationFilter class
+    '''
     if not name:
         raise ValueError("FlexstationFilter requires a name to be specified")
     if not schema:
