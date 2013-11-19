@@ -242,19 +242,19 @@ class FlexstationFilter(object):
 
         fileIndexSave = f.tell()
         while (1 == 1):
-            self.skipIfNumber(f, {0, 1, 2})
+            self.skipIfNumber(f, [0, 1, 2])
             tmplGroupTitle = self.readTmplGroup(f)
             if (tmplGroupTitle != None):
                 fileIndexSave = f.tell()
             else:
                 f.seek(fileIndexSave)
-                self.skipIfNumber(f, {0, 1, 2})
+                self.skipIfNumber(f, [0, 1, 2])
                 tmplSampleTitle = self.readTmplSample(f)
                 if (tmplSampleTitle != None):
                     fileIndexSave = f.tell()
                 else:
                     f.seek(fileIndexSave)
-                    self.skipIfNumber(f, {0, 2})
+                    self.skipIfNumber(f, [0, 2])
                     #if ('analysis_notes' not in metadata):
                         #f.seek(f.tell() + 4) # skips 8 bytes on the 1st occurence of an analysis section
                     analysisName, analysisContent = self.readAnalysisSection(f)
@@ -271,8 +271,8 @@ class FlexstationFilter(object):
 
         # Plate Section
         try:
-            self.skipIfNumber(f, {0})
-            self.skipIfNumber(f, {6})
+            self.skipIfNumber(f, [0])
+            self.skipIfNumber(f, [6])
             fileIndexSave = f.tell()
             plateName = self.readPlateSection(f)
             if (plateName == None):
