@@ -735,11 +735,17 @@ class FlexstationFilter(object):
         :returns result: the string that was read, without the end delimiter. None if the delimiter was never found
         :type result: str
         """
+        if (f == None):
+            return None
+
         result = ''
         data = f.read(1)
         while data != delimiter:
+            if (not data): # the end of the file has been reached without finding the delimiter
+                return None
             result += str(unpack("c", data)[0])
             data = f.read(1)
+
         return (result)
 
     def readStringUntilStringDelimiter(self, f, delimiter="\x00"):
@@ -751,6 +757,9 @@ class FlexstationFilter(object):
         :returns result: the string that was read, without the end delimiter. None if the delimiter was never found.
         :type result: str
         """
+        if (f == None):
+            return None
+
         result = ''
         data = f.read(1)
         while data:
@@ -780,6 +789,8 @@ class FlexstationFilter(object):
         :returns stringContent: the string read, of length defined by the prefix
         :type stringContent: str
         """
+        if (f == None or numberOfByteForPrefix == None or numberOfByteForPrefix <= 0):
+            return None
 
         # reads the length of the string, on n-bytes
         stringLengthHex = binascii.hexlify(f.read(numberOfByteForPrefix))
@@ -797,6 +808,9 @@ class FlexstationFilter(object):
         :param numbers: a dictionnary of the numbers that should be skipped
         :type numbers: dict
         """
+        if (f == None or numbers == None or numbers.__len__() <= 0):
+            return None
+
         fileIndexSave = f.tell()
 
         numberHex = binascii.hexlify(f.read(4))

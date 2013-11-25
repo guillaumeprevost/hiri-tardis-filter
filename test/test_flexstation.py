@@ -83,6 +83,14 @@ class FlexstationFilterTestCase(TestCase):
         self.datafiles = [create_datafile(self.TEST_FILES_PATH[i]) for i in (0,1,2,3,4,5,6)]
 
 
+    def tearDown(self):
+        # Make sure the uploaded replicas are deleted after the tests
+        def delete_replica(df):
+            replica = Replica.objects.get(datafile=df)
+            replica.deleteCompletely()
+        [delete_replica(df) for df in (self.datafiles)]
+
+
     def testFlexstationSimple(self):
         """
         Simple test running the filter and making sure the Softmax version number was saved
@@ -168,3 +176,180 @@ class FlexstationFilterTestCase(TestCase):
         expect(psm.get_param('excitation_wavelengths', True)).to_equal('340 380')
         #expect(psm.get_param('read_per_well', True)).to_equal('')
         #expect(psm.get_param('pmt_settings', True)).to_equal('')
+
+
+    def testFlexstationReadStringUntilDelimiter(self):
+        """
+        Tests the method readStringUntilDelimiter in different contexts
+        """
+        file_path = path.join(path.dirname(__file__), 'fixtures', '050511V1 Pmutants rep1.pda')
+        filter = FlexstationFilter("Flexstation Test Schema", "http://rmit.edu.au/flexstation_test")
+
+        # Test without a file parameter
+        str = filter.readStringUntilDelimiter(None, "\x00")
+        expect(str).to_equal(None)
+
+        with open(file_path, 'rb') as f:
+            # Test with a delimiter which isn't in the remaining of the file (should return None)
+            f.seek(160972)
+            str = filter.readStringUntilDelimiter(f, "\x99")
+            expect(str).to_equal(None)
+
+            # Test with \x00 delimiter
+            f.seek(2)
+            str = filter.readStringUntilDelimiter(f, "\x00")
+            expect(str).to_equal(" 5.42.1.0")
+
+            # Test without specifying delimiter (should be the same as \x00)
+            f.seek(2)
+            str = filter.readStringUntilDelimiter(f)
+            expect(str).to_equal(" 5.42.1.0")
+
+            # Test on a different string
+            f.seek(2438)
+            str = filter.readStringUntilDelimiter(f)
+            expect(str).to_equal("Experiment#1")
+
+            # Test using a different delimiter \x20
+            f.seek(13)
+            str = filter.readStringUntilDelimiter(f, "\x20")
+            expect(str).to_equal("##BLOCKS=")
+
+
+    def testFlexstationReadStringUntilStringDelimiter(self):
+        """
+        Tests the method readStringUntilStringDelimiter in different contexts
+        """
+        file_path = path.join(path.dirname(__file__), 'fixtures', '050511V1 Pmutants rep1.pda')
+        filter = FlexstationFilter("Flexstation Test Schema", "http://rmit.edu.au/flexstation_test")
+
+        # Test without a file parameter
+        str = filter.readStringUntilStringDelimiter(None, "\x00")
+        expect(str).to_equal(None)
+
+        with open(file_path, 'rb') as f:
+            # Test with a delimiter which isn't in the remaining of the file (should return None)
+            f.seek(160972)
+            str = filter.readStringUntilStringDelimiter(f, "\x99")
+            expect(str).to_equal(None)
+
+            # Test with '\x00' delimiter
+            f.seek(2)
+            str = filter.readStringUntilStringDelimiter(f, "\x00")
+            expect(str).to_equal(" 5.42.1.0")
+
+            # Test without specifying delimiter (should be the same as '\x00')
+            f.seek(2)
+            str = filter.readStringUntilStringDelimiter(f)
+            expect(str).to_equal(" 5.42.1.0")
+
+            # Test on a different string
+            f.seek(2438)
+            str = filter.readStringUntilStringDelimiter(f)
+            expect(str).to_equal("Experiment#1")
+
+            # Test using a different delimiter '\x20'
+            f.seek(13)
+            str = filter.readStringUntilStringDelimiter(f, "\x20")
+            expect(str).to_equal("##BLOCKS=")
+
+            # Test using a string delimiter not existing in the file (should return None)
+            f.seek(13)
+            str = filter.readStringUntilStringDelimiter(f, "\x43\x46\x76\x92\x37\x46")
+            expect(str).to_equal(None)
+
+            # Test using a string delimiter '\x42\x4C\x4F\x43\x4B\x53'
+            f.seek(13)
+            str = filter.readStringUntilStringDelimiter(f, "\x42\x4C\x4F\x43\x4B\x53")
+            expect(str).to_equal("##")
+
+
+    def testFlexstationReadStringWithLengthPrefix(self):
+        """
+        Tests the method readStringWithLengthPrefix in different contexts
+        """
+        file_path = path.join(path.dirname(__file__), 'fixtures', '050511V1 Pmutants rep1.pda')
+        filter = FlexstationFilter("Flexstation Test Schema", "http://rmit.edu.au/flexstation_test")
+
+        # Test without a file parameter
+        str = filter.readStringWithLengthPrefix(None, "\x00")
+        expect(str).to_equal(None)
+
+        with open(file_path, 'rb') as f:
+            # Test without prefix length
+            f.seek(2418)
+            str = filter.readStringWithLengthPrefix(f, None)
+            expect(str).to_equal(None)
+
+            # Test with a negative prefix length
+            f.seek(2418)
+            str = filter.readStringWithLengthPrefix(f, -1)
+            expect(str).to_equal(None)
+
+            # Test with a prefix length of 0
+            f.seek(2418)
+            str = filter.readStringWithLengthPrefix(f, 0)
+            expect(str).to_equal(None)
+
+            # Test with a prefix length of 1 byte
+            f.seek(2418)
+            str = filter.readStringWithLengthPrefix(f, 1)
+            expect(str).to_equal("CSExperimentSection")
+
+            # Test with a prefix length of 4 bytes
+            f.seek(5843)
+            str = filter.readStringWithLengthPrefix(f, 4)
+            expect(str).to_equal("TRPV1 Phosphate mutants\rCells seeded 48hrs prior 40K cel/well \rInduced with tetracycline for 3 hrs washed once with hepes (50microL/well) then loaded with fura2 for 1 hr (50 microL/well). then washed twice with 60microl or HEPES buffer per well finaly loaded with 60microl of hepes.\rCells:\rcolumn 1: Nt, 2: WtV1, 3: C1, 4: C2, 5: C3, 6: C4, 7: C5,  8: N1, 9: N6\rinjection 1: rows A-D buffer only, E-H 100microM SLIGRL\rinjection 2: Row A,E DMSO 1%, B,F 1microM CAPS, C,G 10microM CAPS, D,H 100microM caps")
+
+
+    def testSkipIfNumber(self):
+        """
+        Tests the method skipIfNumber in different contexts
+        """
+        file_path = path.join(path.dirname(__file__), 'fixtures', '050511V1 Pmutants rep1.pda')
+        filter = FlexstationFilter("Flexstation Test Schema", "http://rmit.edu.au/flexstation_test")
+
+        # Test without a file parameter
+        result = filter.skipIfNumber(None, [0,1,2])
+        expect(result).to_equal(None)
+
+        with open(file_path, 'rb') as f:
+            # Test without a numbers parameter
+            beforeSkip = f.tell()
+            result = filter.skipIfNumber(f, None)
+            expect(result).to_equal(None)
+            expect(f.tell()).to_equal(beforeSkip)
+
+            # Test with a single number in array
+            f.seek(2485) # next number is 2
+            beforeSkip = f.tell()
+            filter.skipIfNumber(f, [0])
+            expect(f.tell()).to_equal(beforeSkip)
+
+            # Test with multiple numbers without the one to skip
+            f.seek(2485) # next number is 2
+            beforeSkip = f.tell()
+            filter.skipIfNumber(f, [0, 1, 3])
+            expect(f.tell()).to_equal(beforeSkip)
+
+            # Test with a single number being the one to skip
+            f.seek(2485) # next number is 2
+            beforeSkip = f.tell()
+            filter.skipIfNumber(f, [2])
+            expect(f.tell()).to_equal(beforeSkip + 4)
+
+            # Test with multiple numbers icluding the one to skip
+            f.seek(2485) # next number is 2
+            beforeSkip = f.tell()
+            filter.skipIfNumber(f, [0, 1, 2])
+            expect(f.tell()).to_equal(beforeSkip + 4)
+
+            # Wrong data type in array
+            f.seek(2485) # next number is 2
+            beforeSkip = f.tell()
+            filter.skipIfNumber(f, [0, 'string', 2])
+            expect(f.tell()).to_equal(beforeSkip + 4)
+            
+
+
+
